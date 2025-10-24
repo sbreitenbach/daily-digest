@@ -9,7 +9,7 @@ This Python script generates a personalized daily digest email. It fetches infor
 - **NASA:** Fetches the Image of the Day.
 - **Reddit:** Pulls top posts from specified subreddits.
 - **RSS Feeds:** Aggregates news from your favorite sources.
-- **AI Summary:** Uses the Gemini API to summarize the text-based news content.
+- **AI Summary:** Uses the Gemini API to summarize the text-based news content. (Note: This script uses the `requests` library to interact with the Gemini REST API, so the `google-generativeai` package is not required.)
 
 ## Setup
 
