@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 # --- Set up Logging (Dual-Output Version) ---
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 file_handler = logging.FileHandler('digest.log', mode='w')
 file_handler.setLevel(logging.DEBUG)
 file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -27,7 +27,7 @@ logger.addHandler(stream_handler)
 
 # --- Import settings from config.py ---
 try:
-    import config
+    import sample_config
 except ImportError:
     logging.error("config.py not found. Please create it and add your API keys and settings.")
     exit()
