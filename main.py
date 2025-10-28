@@ -27,7 +27,7 @@ logger.addHandler(stream_handler)
 
 # --- Import settings from config.py ---
 try:
-    import sample_config
+    import config
 except ImportError:
     logging.error("config.py not found. Please create it and add your API keys and settings.")
     exit()
