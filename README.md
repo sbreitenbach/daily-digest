@@ -1,6 +1,6 @@
 # Daily Digest Script
 
-This Python script generates a personalized daily digest email. It fetches information from various sources, including:
+This Python script generates a personalized daily digest email. This code was written with the assitance of AI. It fetches information from various sources, including:
 
 - **Financial Markets:** Fetches data from Finnhub for specified assets.
 - **Weather:** Gets the local forecast from the National Weather Service.
@@ -9,7 +9,9 @@ This Python script generates a personalized daily digest email. It fetches infor
 - **NASA:** Fetches the Image of the Day.
 - **Reddit:** Pulls top posts from specified subreddits.
 - **RSS Feeds:** Aggregates news from your favorite sources.
-- **AI Summary:** Uses the Gemini API to summarize the text-based news content. (Note: This script uses the `requests` library to interact with the Gemini REST API, so the `google-generativeai` package is not required.)
+
+## AI Summary
+This script uses the Google Gemini API to summarize the text-based news content. Gemini has a generous free tier and large context window. (Note: This script uses the `requests` library to interact with the Gemini REST API, so the `google-generativeai` package is not required.)
 
 ## Setup
 
@@ -31,10 +33,6 @@ This Python script generates a personalized daily digest email. It fetches infor
     ```
 
 4.  **Configure the script:**
-    -   Create a `config.py` file by copying the `sample_config.py`:
-        ```bash
-        cp sample_config.py config.py
-        ```
     -   Open `config.py` and fill in your API keys, email settings, and feed URLs.
 
 ## Usage
