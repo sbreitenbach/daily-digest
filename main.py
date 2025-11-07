@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 # --- Set up Logging (Dual-Output Version) ---
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 file_handler = logging.FileHandler('digest.log', mode='w')
 file_handler.setLevel(logging.DEBUG)
 file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
