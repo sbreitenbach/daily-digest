@@ -1,12 +1,16 @@
 import requests
 import feedparser
 import smtplib
+import imaplib
 import time
 import logging
 import json
+import os
 from bs4 import BeautifulSoup
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email import message_from_bytes
+from email.header import decode_header
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
@@ -34,6 +38,203 @@ except ImportError:
 
 # Define a single, descriptive User-Agent for all requests.
 USER_AGENT = "DailyDigestBot/1.0"
+
+# Path to feedback context file (same directory as script)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FEEDBACK_CONTEXT_FILE = os.path.join(SCRIPT_DIR, "feedback_context.md")
+
+
+def estimate_tokens(text):
+    """Estimate token count using word-based approximation (words * 1.3 ≈ tokens)."""
+    if not text:
+        return 0
+    words = len(text.split())
+    return int(words * 1.3)
+
+
+def load_feedback_context():
+    """Load the feedback context from the markdown file."""
+    if not os.path.exists(FEEDBACK_CONTEXT_FILE):
+        logging.debug("No feedback context file found.")
+        return ""
+    try:
+        with open(FEEDBACK_CONTEXT_FILE, 'r') as f:
+            content = f.read()
+            logging.info(f"Loaded feedback context ({estimate_tokens(content)} tokens)")
+            return content
+    except Exception:
+        logging.exception("Error reading feedback context file")
+        return ""
+
+
+def save_feedback_context(content):
+    """Save the feedback context to the markdown file."""
+    try:
+        with open(FEEDBACK_CONTEXT_FILE, 'w') as f:
+            f.write(content)
+        logging.info(f"Saved feedback context ({estimate_tokens(content)} tokens)")
+    except Exception:
+        logging.exception("Error saving feedback context file")
+
+
+def check_for_feedback():
+    """Check for email replies to yesterday's newsletter and extract feedback."""
+    logging.info("Checking for feedback in email replies...")
+    
+    try:
+        # Connect to IMAP server
+        mail = imaplib.IMAP4_SSL(config.IMAP_SERVER, config.IMAP_PORT)
+        mail.login(config.EMAIL_SENDER, config.EMAIL_PASSWORD)
+        mail.select('INBOX')
+        
+        # Calculate yesterday's date for search
+        yesterday = datetime.now() - timedelta(days=1)
+        date_str = yesterday.strftime("%d-%b-%Y")
+        
+        # Search for emails from the receiver (user replying) since yesterday
+        # that are replies to the Daily Digest
+        search_criteria = f'(FROM "{config.EMAIL_RECEIVER}" SINCE "{date_str}" SUBJECT "Daily Digest")'
+        logging.debug(f"IMAP search: {search_criteria}")
+        
+        status, messages = mail.search(None, search_criteria)
+        
+        if status != 'OK' or not messages[0]:
+            logging.info("No feedback emails found.")
+            mail.logout()
+            return None
+        
+        email_ids = messages[0].split()
+        logging.info(f"Found {len(email_ids)} potential feedback email(s)")
+        
+        # Get the most recent reply
+        latest_id = email_ids[-1]
+        status, msg_data = mail.fetch(latest_id, '(RFC822)')
+        
+        if status != 'OK':
+            mail.logout()
+            return None
+        
+        # Parse the email
+        raw_email = msg_data[0][1]
+        email_message = message_from_bytes(raw_email)
+        
+        # Extract the body (reply text before quoted content)
+        body = ""
+        if email_message.is_multipart():
+            for part in email_message.walk():
+                if part.get_content_type() == "text/plain":
+                    body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                    break
+        else:
+            body = email_message.get_payload(decode=True).decode('utf-8', errors='ignore')
+        
+        # Clean up: remove quoted original message (lines starting with > or "On ... wrote:")
+        lines = body.split('\n')
+        feedback_lines = []
+        for line in lines:
+            # Stop if we hit quoted content
+            if line.strip().startswith('>') or 'wrote:' in line.lower():
+                break
+            if line.strip():  # Only add non-empty lines
+                feedback_lines.append(line.strip())
+        
+        feedback_text = ' '.join(feedback_lines).strip()
+        
+        mail.logout()
+        
+        if feedback_text:
+            logging.info(f"Extracted feedback: {feedback_text[:100]}...")
+            return feedback_text
+        else:
+            logging.info("Email found but no feedback text extracted.")
+            return None
+            
+    except Exception:
+        logging.exception("Error checking for feedback via IMAP")
+        return None
+
+
+def process_and_update_feedback(new_feedback):
+    """Process new feedback and update the context file, keeping under ~1000 tokens."""
+    logging.info("Processing feedback and updating context...")
+    
+    existing_context = load_feedback_context()
+    
+    # Use Gemini to consolidate and summarize feedback
+    api_key = config.GEMINI_API_KEY
+    model_name = "gemini-2.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    headers = {'Content-Type': 'application/json'}
+    
+    prompt = f"""You are helping manage a user's personalized news digest preferences.
+
+EXISTING PREFERENCES:
+{existing_context if existing_context else "None yet - this is the first feedback."}
+
+NEW FEEDBACK FROM USER:
+{new_feedback}
+
+TASK:
+1. Extract actionable preferences from the new feedback
+2. Merge with existing preferences, removing duplicates or contradictions (newer feedback takes priority)
+3. Create a consolidated preference document
+
+OUTPUT FORMAT (use this exact structure):
+# User Preferences
+
+## Content Priorities
+- [List what types of content to prioritize]
+
+## Content to Reduce
+- [List what types of content to show less of]
+
+## Style Notes
+- [Any preferences about summary style, length, etc.]
+
+## Recent Feedback
+- [2-3 most recent actionable items]
+
+Last updated: {datetime.now().strftime('%Y-%m-%d')}
+
+IMPORTANT: Keep the entire output under 750 words to stay within token limits. Be concise but preserve all important preferences."""
+
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(body))
+        response.raise_for_status()
+        
+        response_data = response.json()
+        updated_context = response_data['candidates'][0]['content']['parts'][0]['text']
+        
+        # Verify token count and truncate if needed
+        tokens = estimate_tokens(updated_context)
+        if tokens > 1000:
+            logging.warning(f"Context too long ({tokens} tokens), requesting condensed version...")
+            # Make another call to condense
+            condense_prompt = f"""Please condense this text to under 600 words while preserving all key preferences:
+
+{updated_context}"""
+            body = {"contents": [{"parts": [{"text": condense_prompt}]}]}
+            response = requests.post(url, headers=headers, data=json.dumps(body))
+            response.raise_for_status()
+            response_data = response.json()
+            updated_context = response_data['candidates'][0]['content']['parts'][0]['text']
+        
+        save_feedback_context(updated_context)
+        logging.info("Feedback context updated successfully.")
+        return updated_context
+        
+    except Exception:
+        logging.exception("Error processing feedback with Gemini")
+        # Fallback: just append new feedback to existing
+        fallback_context = f"{existing_context}\n\n## New Feedback ({datetime.now().strftime('%Y-%m-%d')})\n{new_feedback}"
+        save_feedback_context(fallback_context)
+        return fallback_context
+
+
 
 def get_financial_data(api_key, assets):
     """Fetches financial data from the Finnhub API."""
@@ -249,7 +450,7 @@ def get_rss_content(feeds):
         all_content += "\n"
     return all_content
 
-def get_ai_summary(content_to_summarize):
+def get_ai_summary(content_to_summarize, feedback_context=""):
     """Sends content to Gemini AI for summarization using a direct requests call.
     Usees the REST API endpoint to interact with the Gemini model. 
     Not using the Google client library due to issues getting that working on some hardware."""
@@ -260,16 +461,26 @@ def get_ai_summary(content_to_summarize):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
 
+    # Build user preferences section if feedback context exists
+    preferences_section = ""
+    if feedback_context:
+        preferences_section = f"""
+    USER PREFERENCES (use these to guide your selections):
+    {feedback_context}
+    
+    Apply these preferences when selecting and prioritizing stories.
+    """
+
     prompt = f"""
     You are my personalized news digest assistant. Your task is to review a list of headlines and their accompanying content, then create a clean and insightful HTML email digest.
-
+    {preferences_section}
     Instructions:
     1.  Review the headlines and content for each category provided below. If the same news story appears in multiple categories, please only include it once.
-    2.  For each category, select the 3-4 most interesting or important stories.
+    2.  For each category, select the 3-5 most interesting or important stories. Prioritize based on user preferences if provided.
     3.  For each selected story, write a single, engaging summary sentence. This summary MUST NOT simply rephrase the headline. It should provide a unique insight from the provided content.
     4.  IMPORTANT EXCEPTION: If an item is marked "Type: Link/Image Post", you MUST NOT write a summary for it. Just list the title.
     5.  Format your entire response in simple, clean HTML. Use <h2> for category titles and an unordered list (<ul> with <li>) for the stories. Each list item must contain the hyperlinked title. If you wrote a summary, add it in a <p> tag with smaller, italicized text.
-    6.  Do not include anything in your response except the final HTp-=ML code. Start with <h2> and end with </ul>.
+    6.  Do not include anything in your response except the final HTML code. Start with <h2> and end with </ul>.
 
     Here is the list of headlines and content to analyze:
     {content_to_summarize}
@@ -319,6 +530,15 @@ def main():
     """Main function to run the digest creation process."""
     logging.info("--- Starting the daily digest script ---")
     
+    # --- STEP 0: Check for feedback from yesterday's newsletter ---
+    feedback = check_for_feedback()
+    if feedback:
+        logging.info("Processing user feedback...")
+        process_and_update_feedback(feedback)
+    
+    # Load current feedback context for use in AI summary
+    feedback_context = load_feedback_context()
+    
     # --- STEP 1: Gather all content ---
     financial_html = ""
     if hasattr(config, 'FINNHUB_API_KEY') and config.FINNHUB_API_KEY and hasattr(config, 'FINANCIAL_ASSETS'):
@@ -335,7 +555,7 @@ def main():
     full_content_for_ai = reddit_content + rss_content
     ai_html_body = ""
     if full_content_for_ai.strip():
-        ai_html_body = get_ai_summary(full_content_for_ai)
+        ai_html_body = get_ai_summary(full_content_for_ai, feedback_context)  # Pass context!
     else:
         logging.warning("No text-based news content gathered to send to AI.")
 

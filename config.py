@@ -10,6 +10,10 @@ EMAIL_SENDER = ""
 EMAIL_PASSWORD = ""
 EMAIL_RECEIVER = "" # Can be the same as sender
 
+# --- IMAP SETTINGS (for reading replies) ---
+IMAP_SERVER = "imap.gmail.com" # Or your provider's IMAP server
+IMAP_PORT = 993
+
 # --- CUSTOMIZE YOUR DIGEST ---
 
 # Add your specific National Weather Service (NWS) forecast URL here.

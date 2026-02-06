@@ -13,6 +13,15 @@ This Python script generates a personalized daily digest email. This code was wr
 ## AI Summary
 This script uses the Google Gemini API to summarize the text-based news content. Gemini has a generous free tier and large context window. (Note: This script uses the `requests` library to interact with the Gemini REST API, so the `google-generativeai` package is not required.)
 
+## Personalized Feedback
+
+The digest learns from your preferences over time! Simply reply to any digest email with feedback like:
+- "Show more tech news, less sports"
+- "I prefer shorter summaries"
+- "Prioritize financial and science stories"
+
+The script checks for replies via IMAP, uses AI to extract your preferences, and stores them in `feedback_context.md`. Future digests will prioritize content based on your feedback.
+
 ## Setup
 
 1.  **Clone the repository:**
@@ -33,7 +42,7 @@ This script uses the Google Gemini API to summarize the text-based news content.
     ```
 
 4.  **Configure the script:**
-    -   Open `config.py` and fill in your API keys, email settings, and feed URLs.
+    -   Open `config.py` and fill in your API keys, email settings (SMTP and IMAP), and feed URLs.
 
 ## Usage
 
